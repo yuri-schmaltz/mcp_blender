@@ -1,0 +1,510 @@
+import json
+import os
+import socket
+import sys
+import types
+from pathlib import Path
+from unittest import TestCase
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+
+def _add_src_to_path():
+    """Ensure the repository's src directory is importable."""
+    repo_root = Path(__file__).resolve().parents[1]
+    src_path = repo_root / "src"
+    if str(src_path) not in os.sys.path:
+        os.sys.path.insert(0, str(src_path))
+
+
+_add_src_to_path()
+
+
+def _mock_mcp_dependencies():
+    """Provide lightweight stand-ins for the mcp package to enable imports."""
+    if "mcp" in sys.modules:
+        return
+
+    class _DummyFastMCP:
+        def __init__(self, *_, **__):
+            pass
+
+        def resource(self, *_, **__):
+            def decorator(func):
+                return func
+
+            return decorator
+
+        def tool(self, *_, **__):
+            def decorator(func):
+                return func
+
+            return decorator
+
+        def prompt(self, *_, **__):
+            def decorator(func):
+                return func
+
+            return decorator
+
+    mcp_module = types.ModuleType("mcp")
+    mcp_server_module = types.ModuleType("mcp.server")
+    mcp_server_fastmcp_module = types.ModuleType("mcp.server.fastmcp")
+
+    mcp_server_fastmcp_module.FastMCP = _DummyFastMCP
+    mcp_server_fastmcp_module.Context = MagicMock()
+    mcp_server_fastmcp_module.Image = MagicMock()
+
+    mcp_server_module.fastmcp = mcp_server_fastmcp_module
+    mcp_module.server = mcp_server_module
+
+    sys.modules["mcp"] = mcp_module
+    sys.modules["mcp.server"] = mcp_server_module
+    sys.modules["mcp.server.fastmcp"] = mcp_server_fastmcp_module
+
+
+_mock_mcp_dependencies()
+
+from blender_mcp import server  # noqa: E402  # isort: skip
+
+
+class _StubSocket:
+    def __init__(
+        self,
+        *,
+        recv_chunks=None,
+        recv_side_effects=None,
+        send_side_effect=None,
+        connect_side_effect=None,
+    ):
+        self.recv_chunks = list(recv_chunks or [])
+        self.recv_side_effects = list(recv_side_effects or [])
+        self.send_side_effect = send_side_effect
+        self.connect_side_effect = connect_side_effect
+        self.sent_payloads = []
+        self.closed = False
+        self.connect_calls = 0
+        self.timeout = None
+
+    def settimeout(self, timeout):
+        self.timeout = timeout
+
+    def connect(self, address):
+        self.connect_calls += 1
+        self.address = address
+        if self.connect_side_effect:
+            raise self.connect_side_effect
+
+    def sendall(self, data):
+        if self.send_side_effect:
+            raise self.send_side_effect
+        self.sent_payloads.append(data)
+
+    def recv(self, _):
+        if self.recv_side_effects:
+            effect = self.recv_side_effects.pop(0)
+            if isinstance(effect, Exception):
+                raise effect
+            return effect
+        if self.recv_chunks:
+            return self.recv_chunks.pop(0)
+        return b""
+
+    def close(self):
+        self.closed = True
+
+
+@pytest.fixture
+def stub_socket(monkeypatch):
+    queued_sockets: list[_StubSocket] = []
+
+    def queue_socket(stub: _StubSocket) -> _StubSocket:
+        queued_sockets.append(stub)
+        return stub
+
+    def fake_socket(*_, **__):
+        if not queued_sockets:
+            raise AssertionError("No stub sockets queued")
+        return queued_sockets.pop(0)
+
+    monkeypatch.setattr(server.socket, "socket", fake_socket)
+    return queue_socket
+
+
+def _stub_connection(**kwargs) -> server.BlenderConnection:
+    return server.BlenderConnection(
+        host="localhost",
+        port=9999,
+        timeout=0.01,
+        connect_attempts=1,
+        command_attempts=kwargs.get("command_attempts", 2),
+        backoff_seconds=0,
+    )
+
+
+def test_send_command_recovers_from_partial_response(stub_socket):
+    first = stub_socket(
+        _StubSocket(
+            recv_chunks=[b'{"status": "ok"'],
+        )
+    )
+    second = stub_socket(
+        _StubSocket(
+            recv_chunks=[b'{"status": "ok", "result": {"value": 1}}'],
+        )
+    )
+
+    conn = _stub_connection()
+    result = conn.send_command("ping", {"sequence": 1})
+
+    assert result == {"value": 1}
+    assert first.closed
+    assert second.connect_calls == 1
+
+
+def test_send_command_retries_after_timeout_and_reconnects(stub_socket):
+    failing = stub_socket(
+        _StubSocket(
+            recv_side_effects=[TimeoutError()],
+        )
+    )
+    recovering = stub_socket(
+        _StubSocket(
+            recv_chunks=[b'{"status": "ok", "result": {"pong": true}}'],
+        )
+    )
+
+    conn = _stub_connection(command_attempts=1)
+
+    with pytest.raises(Exception) as excinfo:
+        conn.send_command("ping", {"sequence": 1})
+
+    assert "Blender did not respond after" in str(excinfo.value)
+    assert failing.closed
+    assert conn.sock is None
+
+    result = conn.send_command("ping", {"sequence": 2})
+
+    assert result == {"pong": True}
+    assert recovering.connect_calls == 1
+
+
+def test_get_mcp_diagnostics_reports_unreachable_connection(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "get_blender_connection",
+        lambda: (_ for _ in ()).throw(Exception("connection down")),
+    )
+
+    result = server.get_mcp_diagnostics(ctx=None)
+    payload = json.loads(result)
+
+    assert payload["connection"]["reachable"] is False
+    assert "connection down" in payload["connection"]["error"]
+    assert "perf_metrics" in payload
+
+
+def test_get_mcp_diagnostics_reports_scene_probe(monkeypatch):
+    mock_blender = MagicMock()
+    mock_blender.send_command.return_value = {
+        "name": "Scene",
+        "object_count": 3,
+        "materials_count": 1,
+    }
+    monkeypatch.setattr(server, "get_blender_connection", lambda: mock_blender)
+
+    result = server.get_mcp_diagnostics(ctx=None)
+    payload = json.loads(result)
+
+    assert payload["connection"]["reachable"] is True
+    assert payload["scene_probe"]["object_count"] == 3
+
+
+def test_generate_fastener_calls_blender(monkeypatch):
+    mock_blender = MagicMock()
+    mock_blender.send_command.return_value = {"success": True, "object_name": "Screw"}
+    monkeypatch.setattr(server, "get_blender_connection", lambda: mock_blender)
+
+    res_str = server.generate_fastener(
+        ctx=None,
+        type="SCREW",
+        size="M3",
+        length=12.0,
+        head_type="SOCKET",
+        location=[1, 2, 3],
+        axis=[0, 0, 1],
+    )
+    res = json.loads(res_str)
+    assert res["success"] is True
+    mock_blender.send_command.assert_called_once_with(
+        "generate_fastener",
+        {
+            "type": "SCREW",
+            "size": "M3",
+            "length": 12.0,
+            "head_type": "SOCKET",
+            "location": [1, 2, 3],
+            "axis": [0, 0, 1],
+        },
+    )
+
+
+def test_analyze_structural_properties_calls_blender(monkeypatch):
+    mock_blender = MagicMock()
+    mock_blender.send_command.return_value = {"success": True, "object_name": "Cube"}
+    monkeypatch.setattr(server, "get_blender_connection", lambda: mock_blender)
+
+    res_str = server.analyze_structural_properties(
+        ctx=None, object_name="Cube", material_preset="PLA"
+    )
+    res = json.loads(res_str)
+    assert res["success"] is True
+    mock_blender.send_command.assert_called_once_with(
+        "analyze_structural_properties",
+        {
+            "object_name": "Cube",
+            "material_preset": "PLA",
+        },
+    )
+
+
+def test_detect_thin_walls_calls_blender(monkeypatch):
+    mock_blender = MagicMock()
+    mock_blender.send_command.return_value = {
+        "success": True,
+        "object_name": "Cube",
+        "is_safe": True,
+    }
+    monkeypatch.setattr(server, "get_blender_connection", lambda: mock_blender)
+
+    res_str = server.detect_thin_walls(
+        ctx=None, object_name="Cube", threshold_mm=1.5, max_samples=200
+    )
+    res = json.loads(res_str)
+    assert res["success"] is True
+    mock_blender.send_command.assert_called_once_with(
+        "detect_thin_walls",
+        {"object_name": "Cube", "threshold_mm": 1.5, "max_samples": 200},
+    )
+
+
+def test_analyze_overhangs_calls_blender(monkeypatch):
+    mock_blender = MagicMock()
+    mock_blender.send_command.return_value = {
+        "success": True,
+        "object_name": "Cube",
+        "overhang_percentage": 10.5,
+    }
+    monkeypatch.setattr(server, "get_blender_connection", lambda: mock_blender)
+
+    res_str = server.analyze_overhangs(ctx=None, object_name="Cube", threshold_angle_deg=50.0)
+    res = json.loads(res_str)
+    assert res["success"] is True
+    mock_blender.send_command.assert_called_once_with(
+        "analyze_overhangs",
+        {"object_name": "Cube", "threshold_angle_deg": 50.0},
+    )
+
+
+def test_cleanup_degenerate_mesh_calls_blender(monkeypatch):
+    mock_blender = MagicMock()
+    mock_blender.send_command.return_value = {
+        "success": True,
+        "object_name": "Cube",
+        "vertices_removed": 4,
+    }
+    monkeypatch.setattr(server, "get_blender_connection", lambda: mock_blender)
+
+    res_str = server.cleanup_degenerate_mesh(
+        ctx=None, object_name="Cube", min_edge_length_mm=0.05, min_face_area_mm2=0.02
+    )
+    res = json.loads(res_str)
+    assert res["success"] is True
+    mock_blender.send_command.assert_called_once_with(
+        "cleanup_degenerate_mesh",
+        {"object_name": "Cube", "min_edge_length_mm": 0.05, "min_face_area_mm2": 0.02},
+    )
+
+
+def test_generate_watertight_hull_calls_blender(monkeypatch):
+    mock_blender = MagicMock()
+    mock_blender.send_command.return_value = {
+        "success": True,
+        "object_name": "Cube",
+        "is_watertight": True,
+    }
+    monkeypatch.setattr(server, "get_blender_connection", lambda: mock_blender)
+
+    res_str = server.generate_watertight_hull(
+        ctx=None, object_name="Cube", voxel_size_mm=0.8, smooth_iterations=3
+    )
+    res = json.loads(res_str)
+    assert res["success"] is True
+    mock_blender.send_command.assert_called_once_with(
+        "generate_watertight_hull",
+        {"object_name": "Cube", "voxel_size_mm": 0.8, "smooth_iterations": 3},
+    )
+
+
+def test_optimize_print_orientation_calls_blender(monkeypatch):
+    mock_blender = MagicMock()
+    mock_blender.send_command.return_value = {
+        "success": True,
+        "object_name": "Cube",
+        "best_orientation_euler_deg": [0, 0, 0],
+    }
+    monkeypatch.setattr(server, "get_blender_connection", lambda: mock_blender)
+
+    res_str = server.optimize_print_orientation(ctx=None, object_name="Cube", apply_rotation=True)
+    res = json.loads(res_str)
+    assert res["success"] is True
+    mock_blender.send_command.assert_called_once_with(
+        "optimize_print_orientation",
+        {"object_name": "Cube", "apply_rotation": True},
+    )
+
+
+def test_generate_lod_chain_calls_blender(monkeypatch):
+    mock_blender = MagicMock()
+    mock_blender.send_command.return_value = {
+        "success": True,
+        "base_object": "Cube",
+        "lods": [{"lod_level": 0}, {"lod_level": 1}],
+    }
+    monkeypatch.setattr(server, "get_blender_connection", lambda: mock_blender)
+
+    res_str = server.generate_lod_chain(
+        ctx=None, object_name="Cube", ratios=[1.0, 0.5], create_collection=True
+    )
+    res = json.loads(res_str)
+    assert res["success"] is True
+    mock_blender.send_command.assert_called_once_with(
+        "generate_lod_chain",
+        {"object_name": "Cube", "ratios": [1.0, 0.5], "create_collection": True},
+    )
+
+
+def test_auto_quad_remesh_calls_blender(monkeypatch):
+    mock_blender = MagicMock()
+    mock_blender.send_command.return_value = {
+        "success": True,
+        "object_name": "Cube",
+        "final_counts": {"faces": 4000, "vertices": 4002},
+    }
+    monkeypatch.setattr(server, "get_blender_connection", lambda: mock_blender)
+
+    res_str = server.auto_quad_remesh(
+        ctx=None,
+        object_name="Cube",
+        target_faces=3500,
+        use_mesh_symmetry=True,
+        use_preserve_sharp=True,
+        use_preserve_boundary=False,
+    )
+    res = json.loads(res_str)
+    assert res["success"] is True
+    mock_blender.send_command.assert_called_once_with(
+        "auto_quad_remesh",
+        {
+            "object_name": "Cube",
+            "target_faces": 3500,
+            "use_mesh_symmetry": True,
+            "use_preserve_sharp": True,
+            "use_preserve_boundary": False,
+        },
+    )
+
+
+def test_apply_slicer_xy_compensation_calls_blender(monkeypatch):
+    mock_blender = MagicMock()
+    mock_blender.send_command.return_value = {
+        "success": True,
+        "object_name": "Box_Lid",
+        "material_preset": "PETG",
+        "contour_compensation_mm": -0.22,
+    }
+    monkeypatch.setattr(server, "get_blender_connection", lambda: mock_blender)
+
+    res_str = server.apply_slicer_xy_compensation(
+        ctx=None,
+        object_name="Box_Lid",
+        contour_compensation_mm=None,
+        hole_compensation_mm=None,
+        material_preset="PETG",
+        fit_type="SLIDING",
+        auto_detect_holes=True,
+    )
+    res = json.loads(res_str)
+    assert res["success"] is True
+    mock_blender.send_command.assert_called_once_with(
+        "apply_slicer_xy_compensation",
+        {
+            "object_name": "Box_Lid",
+            "contour_compensation_mm": None,
+            "hole_compensation_mm": None,
+            "material_preset": "PETG",
+            "fit_type": "SLIDING",
+            "auto_detect_holes": True,
+        },
+    )
+
+
+def test_blendermcp_list_tools_filtering(monkeypatch):
+    import asyncio
+
+    class DummyTool:
+        def __init__(self, name):
+            self.name = name
+
+    all_tools = [
+        DummyTool("get_scene_info"),
+        DummyTool("apply_boolean_operation"),
+        DummyTool("download_polyhaven_asset"),
+        DummyTool("add_physics_constraint"),
+        DummyTool("analyze_structural_properties"),
+    ]
+
+    mock_blender = MagicMock()
+    mock_blender.send_command.return_value = {"mcp_tool_profile": "PHYSICS"}
+    monkeypatch.setattr(server, "get_blender_connection", lambda: mock_blender)
+
+    async def mock_super_list_tools(*args, **kwargs):
+        return all_tools
+
+    mcp_instance = server.BlenderMCP("TestMCP")
+    monkeypatch.setattr(server.FastMCP, "list_tools", mock_super_list_tools, raising=False)
+
+    async def run_async_test():
+        # Call list_tools
+        filtered_tools = await mcp_instance.list_tools()
+
+        # With PHYSICS profile, it should only return get_scene_info (essential) and add_physics_constraint
+        names = [t.name for t in filtered_tools]
+        assert "get_scene_info" in names
+        assert "add_physics_constraint" in names
+        assert "apply_boolean_operation" not in names
+        assert "download_polyhaven_asset" not in names
+        assert "analyze_structural_properties" not in names
+        assert len(names) == 2
+
+        # Test ALL profile
+        mock_blender.send_command.return_value = {"mcp_tool_profile": "ALL"}
+        filtered_tools = await mcp_instance.list_tools()
+        assert len(filtered_tools) == 5
+
+        # Test MATERIALS profile
+        mock_blender.send_command.return_value = {"mcp_tool_profile": "MATERIALS"}
+        filtered_tools = await mcp_instance.list_tools()
+        names = [t.name for t in filtered_tools]
+        assert "get_scene_info" in names
+        assert "download_polyhaven_asset" in names
+        assert "add_physics_constraint" not in names
+        assert len(names) == 2
+
+        # Test failure / default to ALL
+        mock_blender.send_command.side_effect = Exception("connection lost")
+        filtered_tools = await mcp_instance.list_tools()
+        assert len(filtered_tools) == 5
+
+    asyncio.run(run_async_test())

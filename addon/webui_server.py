@@ -1,0 +1,262 @@
+import concurrent.futures
+import http.server
+import json
+import logging
+import os
+import threading
+import traceback
+
+import bpy
+
+logger = logging.getLogger("BlenderMCP.WebUI")
+
+
+class WebUIHandler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/" or self.path == "/index.html":
+            self.send_response(200)
+            self.send_header("Content-type", "text/html; charset=utf-8")
+            self.end_headers()
+
+            html_path = os.path.join(os.path.dirname(__file__), "ui", "web", "index.html")
+            try:
+                with open(html_path, encoding="utf-8") as f:
+                    content = f.read()
+                self.wfile.write(content.encode("utf-8"))
+            except Exception as e:
+                self.wfile.write(f"Error loading HTML: {e}".encode())
+        elif self.path == "/api/scene":
+            try:
+                import concurrent.futures
+
+                scene_future = concurrent.futures.Future()
+
+                def _run_in_main():
+                    try:
+                        import bpy
+
+                        scene_data = {"status": "success", "objects": []}
+
+                        scene = getattr(bpy.context, "scene", None)
+                        if scene is not None:
+                            for obj in scene.objects:
+                                obj_data = {
+                                    "name": obj.name,
+                                    "type": obj.type,
+                                    "location": [obj.location.x, obj.location.y, obj.location.z],
+                                    "rotation": [
+                                        obj.rotation_euler.x,
+                                        obj.rotation_euler.y,
+                                        obj.rotation_euler.z,
+                                    ],
+                                    "scale": [obj.scale.x, obj.scale.y, obj.scale.z],
+                                    "dimensions": [
+                                        obj.dimensions.x,
+                                        obj.dimensions.y,
+                                        obj.dimensions.z,
+                                    ]
+                                    if hasattr(obj, "dimensions")
+                                    else [1, 1, 1],
+                                }
+
+                                shape_guess = "cube"
+                                name_lower = obj.name.lower()
+                                if "sphere" in name_lower or (
+                                    obj.type == "MESH"
+                                    and hasattr(obj.data, "vertices")
+                                    and len(obj.data.vertices) == 482
+                                ):
+                                    shape_guess = "sphere"
+                                elif (
+                                    "cylinder" in name_lower
+                                    or "screw" in name_lower
+                                    or "bolt" in name_lower
+                                    or "shaft" in name_lower
+                                    or "pocket" in name_lower
+                                    or "hole" in name_lower
+                                ):
+                                    shape_guess = "cylinder"
+                                elif "cone" in name_lower:
+                                    shape_guess = "cone"
+                                elif (
+                                    "torus" in name_lower
+                                    or "bearing" in name_lower
+                                    or "nut" in name_lower
+                                    or "washer" in name_lower
+                                ):
+                                    shape_guess = "torus"
+                                elif "light" in name_lower or obj.type == "LIGHT":
+                                    shape_guess = "light"
+                                    obj_data["light_type"] = (
+                                        obj.data.type if hasattr(obj, "data") else "POINT"
+                                    )
+                                elif obj.type == "CAMERA":
+                                    shape_guess = "camera"
+
+                                obj_data["shape_guess"] = shape_guess
+                                scene_data["objects"].append(obj_data)
+
+                        scene_future.set_result(scene_data)
+                    except Exception as e:
+                        scene_future.set_exception(e)
+                    return None
+
+                bpy.app.timers.register(_run_in_main)
+                scene_info = scene_future.result(timeout=5.0)
+
+                self.send_response(200)
+                self.send_header("Content-type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps(scene_info).encode("utf-8"))
+            except Exception as e:
+                self.send_response(500)
+                self.send_header("Content-type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode("utf-8"))
+        elif self.path == "/api/stream":
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Connection", "keep-alive")
+                self.end_headers()
+
+                logger.info("WebUI client connected to SSE live stream")
+
+                last_version = -1
+                while True:
+                    stream_future = concurrent.futures.Future()
+
+                    def _fetch():
+                        try:
+                            objs = []
+                            scene = getattr(bpy.context, "scene", None)
+                            if scene is not None:
+                                for obj in scene.objects:
+                                    # Safe property checks
+                                    type_str = getattr(obj, "type", "MESH")
+                                    loc = getattr(obj, "location", None)
+                                    rot = getattr(obj, "rotation_euler", None)
+                                    scl = getattr(obj, "scale", None)
+                                    dim = getattr(obj, "dimensions", None)
+
+                                    objs.append(
+                                        {
+                                            "name": obj.name,
+                                            "type": type_str,
+                                            "location": [loc.x, loc.y, loc.z] if loc else [0, 0, 0],
+                                            "rotation": [rot.x, rot.y, rot.z] if rot else [0, 0, 0],
+                                            "scale": [scl.x, scl.y, scl.z] if scl else [1, 1, 1],
+                                            "dimensions": [dim.x, dim.y, dim.z]
+                                            if dim
+                                            else [1, 1, 1],
+                                            "shape_guess": "cube",
+                                        }
+                                    )
+                            # Resolve shape guesses
+                            for obj_data in objs:
+                                name_lower = str(obj_data["name"]).lower()
+                                shape_guess = "cube"
+                                if "sphere" in name_lower:
+                                    shape_guess = "sphere"
+                                elif (
+                                    "cylinder" in name_lower
+                                    or "screw" in name_lower
+                                    or "bolt" in name_lower
+                                    or "shaft" in name_lower
+                                    or "pocket" in name_lower
+                                    or "hole" in name_lower
+                                ):
+                                    shape_guess = "cylinder"
+                                elif "cone" in name_lower:
+                                    shape_guess = "cone"
+                                elif (
+                                    "torus" in name_lower
+                                    or "bearing" in name_lower
+                                    or "nut" in name_lower
+                                    or "washer" in name_lower
+                                ):
+                                    shape_guess = "torus"
+                                obj_data["shape_guess"] = shape_guess
+                            stream_future.set_result(objs)
+                        except Exception as e:
+                            stream_future.set_exception(e)
+                        return None
+
+                    bpy.app.timers.register(_fetch)
+                    try:
+                        objs = stream_future.result(timeout=1.0)
+                        objs_str = json.dumps(objs)
+                        import hashlib
+
+                        h = hashlib.md5(objs_str.encode("utf-8")).hexdigest()
+                        if h != last_version:
+                            last_version = h
+                            payload = {"status": "success", "objects": objs}
+                            self.wfile.write(f"data: {json.dumps(payload)}\n\n".encode())
+                            self.wfile.flush()
+                    except (concurrent.futures.TimeoutError, TimeoutError) as e:
+                        logger.warning(
+                            f"SSE viewport stream tick timed out (Blender main thread busy): {e}"
+                        )
+                        import time
+
+                        time.sleep(0.1)
+                        continue
+                    except Exception as e:
+                        # Client disconnected or other network error
+                        logger.info(f"SSE viewport stream connection closed: {e}")
+                        break
+
+                    import time
+
+                    time.sleep(0.1)  # 10Hz limit
+            except Exception as e:
+                logger.error(f"SSE general failure: {e}")
+        else:
+            self.send_error(404, "File not found")
+
+    def do_POST(self):
+        self.send_error(404, "Endpoint not found")
+
+    def log_message(self, format, *args):
+        # Suppress default HTTP logging to avoid spamming Blender console
+        pass
+
+
+class BlenderMCPWebUIServer:
+    def __init__(self, port=8080):
+        self.port = port
+        self.server = None
+        self.server_thread = None
+
+    def start(self):
+        if self.server:
+            logger.warning("WebUI Server is already running")
+            return
+
+        try:
+            self.server = http.server.ThreadingHTTPServer(("", self.port), WebUIHandler)
+            self.server_thread = threading.Thread(
+                target=self.server.serve_forever, name="blender-mcp-webui"
+            )
+            self.server_thread.daemon = True
+            self.server_thread.start()
+            logger.info(f"WebUI Server started on port {self.port}")
+        except Exception as e:
+            logger.error(f"Failed to start WebUI Server: {e}")
+            self.stop()
+
+    def stop(self):
+        if self.server:
+            try:
+                self.server.shutdown()
+                self.server.server_close()
+            except Exception as e:
+                logger.error(f"Error closing WebUI Server: {e}")
+            self.server = None
+
+        if self.server_thread and self.server_thread.is_alive():
+            self.server_thread.join(timeout=2.0)
+            self.server_thread = None
+        logger.info("WebUI Server stopped")
