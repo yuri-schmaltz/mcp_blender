@@ -378,7 +378,7 @@ def _load_addon_module():
 bl_info = {
     "name": "Blender MCP",
     "author": "Yuri Schmaltz",
-    "version": (2, 13, 0),
+    "version": (2, 14, 0),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > BlenderMCP",
     "description": "Connect Blender to local LLM clients via MCP",

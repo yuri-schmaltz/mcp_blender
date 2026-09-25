@@ -9,6 +9,25 @@ practical.
 
 Nothing yet.
 
+## [2.14.0] — 2026-09-25
+
+**Status bar integration, UI streamlining, built-in chat removal & author consolidation.**
+
+### Added
+- **Status Bar Integration**: Indicador de status compacto e elegante no rodapé do Blender (`bpy.types.STATUSBAR_HT_header`) exibindo `RADIOBUT_ON` quando ativo e `RADIOBUT_OFF` quando inativo.
+- **Toggle Operator (`blendermcp.toggle_server`)**: Alternância de ligar/desligar o servidor MCP com um único clique diretamente na barra de status, com redesenho forçado imediato da UI (`STATUSBAR` e `VIEW_3D`).
+- **Unit Test Coverage**: Adicionado [`tests/unit/test_statusbar.py`](file:///home/yuri/Documentos/blender_mcp/tests/unit/test_statusbar.py), elevando a suíte para 186 testes com 100% de sucesso.
+- **Robust Documentation**: Reestruturação e modernização de [`README.md`](file:///home/yuri/Documentos/blender_mcp/README.md), [`CONTRIBUTING.md`](file:///home/yuri/Documentos/blender_mcp/CONTRIBUTING.md), [`docs/TROUBLESHOOTING.md`](file:///home/yuri/Documentos/blender_mcp/docs/TROUBLESHOOTING.md) e [`docs/RUNBOOK.md`](file:///home/yuri/Documentos/blender_mcp/docs/RUNBOOK.md).
+
+### Changed
+- **Button Renaming**: Botão principal alterado de `"Connect to LLM"` para `"Start Server"` (com suporte multilíngue em inglês e português).
+- **Author & License Consolidation**: Licença MIT e metadados (`pyproject.toml`, `blender_manifest.toml`, `__init__.py`) atribuídos exclusivamente a Yuri Schmaltz.
+
+### Removed
+- **Built-in AI Chat**: Removido sub-painel de chat interno e excluído `addon/handlers/llm_handler.py`.
+- **Dependencies Cleaned**: Removido `litellm` e mais de 25 dependências transitivas pesadas, eliminando potenciais alertas de segurança e reduzindo drasticamente o tamanho do pacote.
+- **Redundant Labels**: Removido o texto `"Connected · Port 9876"` do painel lateral.
+
 ## [2.13.0] — 2026-09-24
 
 **Dependency security resolution & packaging release.**

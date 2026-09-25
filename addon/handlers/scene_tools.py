@@ -298,18 +298,57 @@ def get_viewport_screenshot(scene, max_size=800, filepath=None, format="png"):
         is_temp = True
 
     try:
-        # Find the active 3D viewport
-        area = None
-        for a in bpy.context.screen.areas:
-            if a.type == "VIEW_3D":
-                area = a
+        # Find the active 3D viewport and its window
+        target_win = None
+        target_area = None
+        target_region = None
+
+        # Check all windows in window manager
+        wm = getattr(bpy.context, "window_manager", None)
+        windows = getattr(wm, "windows", []) if wm else []
+        for win in windows:
+            screen = getattr(win, "screen", None)
+            if not screen:
+                continue
+            for a in getattr(screen, "areas", []):
+                if a.type == "VIEW_3D":
+                    target_win = win
+                    target_area = a
+                    for r in getattr(a, "regions", []):
+                        if r.type == "WINDOW":
+                            target_region = r
+                            break
+                    break
+            if target_area:
                 break
 
-        if not area:
-            return {"error": "No 3D viewport found"}
+        # Fallback to context.screen if window_manager didn't have windows
+        if not target_area and getattr(bpy.context, "screen", None):
+            for a in bpy.context.screen.areas:
+                if a.type == "VIEW_3D":
+                    target_area = a
+                    for r in getattr(a, "regions", []):
+                        if r.type == "WINDOW":
+                            target_region = r
+                            break
+                    break
+
+        if not target_area:
+            return {"error": "No 3D viewport found in active workspace"}
 
         # Take screenshot with proper context override
-        with bpy.context.temp_override(area=area):
+        override_kwargs = {"area": target_area}
+        if target_win:
+            override_kwargs["window"] = target_win
+            override_kwargs["screen"] = target_win.screen
+        if target_region:
+            override_kwargs["region"] = target_region
+
+        temp_override = getattr(bpy.context, "temp_override", None)
+        if temp_override is not None:
+            with temp_override(**override_kwargs):
+                bpy.ops.screen.screenshot_area(filepath=filepath)
+        else:
             bpy.ops.screen.screenshot_area(filepath=filepath)
 
         # Load and resize if needed
