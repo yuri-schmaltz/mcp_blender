@@ -90,7 +90,50 @@ def execute_command(command: dict):
     except Exception as e:
         logger.error(f"Error executing {cmd_type}: {e}")
         traceback.print_exc()
-        return {"status": "error", "message": str(e)}
+
+        # PEP 678 & Diagnostic Context Enrichment (Python 3.11+)
+        ctx_mode = "UNKNOWN"
+        active_obj_name = None
+        selected_count = 0
+        scene_name = None
+
+        try:
+            ctx = getattr(bpy, "context", None)
+            if ctx is not None:
+                ctx_mode = getattr(ctx, "mode", "UNKNOWN")
+                active_obj = getattr(ctx, "active_object", None)
+                if active_obj is not None:
+                    active_obj_name = getattr(active_obj, "name", None)
+                selected_objs = getattr(ctx, "selected_objects", [])
+                selected_count = len(selected_objs) if selected_objs is not None else 0
+                scene = getattr(ctx, "scene", None)
+                if scene is not None:
+                    scene_name = getattr(scene, "name", None)
+        except Exception:
+            pass
+
+        diag_note = (
+            f"[Blender Context: mode={ctx_mode}, active_object={active_obj_name}, "
+            f"selected_count={selected_count}, scene={scene_name}]"
+        )
+        if hasattr(e, "add_note"):
+            try:
+                e.add_note(diag_note)
+            except Exception:
+                pass
+
+        return {
+            "status": "error",
+            "message": str(e),
+            "diagnostic": {
+                "command": cmd_type,
+                "context_mode": ctx_mode,
+                "active_object": active_obj_name,
+                "selected_count": selected_count,
+                "scene": scene_name,
+                "notes": getattr(e, "__notes__", [diag_note]),
+            },
+        }
 
 
 def get_registered_commands():

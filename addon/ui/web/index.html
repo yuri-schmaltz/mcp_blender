@@ -411,6 +411,10 @@
         <div class="header-left">
             <div class="logo">B</div>
             <h1>BlenderMCP Console</h1>
+            <div id="telemetry-badges" style="display: flex; gap: 8px; margin-left: 16px;">
+                <span class="status-badge" id="badge-version" style="font-size: 0.75rem; background: rgba(255,255,255,0.06); padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border-color); color: var(--text-muted);">Blender ...</span>
+                <span class="status-badge" id="badge-tools" style="font-size: 0.75rem; background: rgba(94,106,210,0.15); padding: 4px 8px; border-radius: 6px; border: 1px solid rgba(94,106,210,0.3); color: #b4bcf5;">... Tools</span>
+            </div>
         </div>
         <div class="status-container">
             <div class="status-dot"></div>
@@ -821,6 +825,24 @@
                 setTimeout(setupLiveStream, 5000);
             };
         }
+
+        // Telemetry update function
+        async function updateTelemetry() {
+            try {
+                const res = await fetch('/api/status');
+                if (res.ok) {
+                    const data = await res.json();
+                    const badgeVer = document.getElementById('badge-version');
+                    const badgeTools = document.getElementById('badge-tools');
+                    if (badgeVer) badgeVer.textContent = `Blender ${data.blender_version} (Py ${data.python_version})`;
+                    if (badgeTools) badgeTools.textContent = `${data.commands_registered} Tools Active`;
+                }
+            } catch (e) {
+                // Ignore transient errors
+            }
+        }
+        setInterval(updateTelemetry, 4000);
+        updateTelemetry();
 
         // Start live streaming
         setupLiveStream();

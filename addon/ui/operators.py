@@ -196,6 +196,31 @@ class BLENDERMCP_OT_CopyMCPClientConfig(bpy.types.Operator):
 
 
 # ---------------------------------------------------------------------------
+# Operator: Copy System Prompt
+# ---------------------------------------------------------------------------
+class BLENDERMCP_OT_CopySystemPrompt(bpy.types.Operator):
+    bl_idname = "blendermcp.copy_system_prompt"
+    bl_label = "Copy Recommended System Prompt"
+    bl_description = "Copy an optimized system prompt for LM Studio / Claude to maximize MCP tool-calling accuracy"
+
+    def execute(self, context):
+        prompt = (
+            "You are an expert 3D Artist and Blender automation assistant connected directly to Blender via the Model Context Protocol (MCP).\n\n"
+            "RULES FOR OPERATION:\n"
+            "1. ALWAYS inspect the existing scene first with `get_scene_info()` before adding or transforming objects.\n"
+            "2. ALWAYS invoke tools directly via the tool-calling interface. NEVER output raw JavaScript, HTML, or Three.js code.\n"
+            "3. Use the metric system (meters) for dimensions, locations, and scales.\n"
+            "4. For stacking and assembling objects, use `place_object_on_top` and `snap_to_ground` rather than manual coordinate estimation.\n"
+            "5. Apply realistic PBR materials using `create_pbr_material`.\n"
+            "6. To verify your work visually, invoke `get_viewport_screenshot` to inspect the scene."
+        )
+        context.window_manager.clipboard = prompt
+        self.report({"INFO"}, "Recommended system prompt copied to clipboard!")
+        _update_action_status(context.scene, "Copy System Prompt", True, "System prompt copied")
+        return {"FINISHED"}
+
+
+# ---------------------------------------------------------------------------
 # Operator: Health Check
 # ---------------------------------------------------------------------------
 class BLENDERMCP_OT_HealthCheck(bpy.types.Operator):
@@ -486,6 +511,7 @@ OPERATOR_CLASSES = [
     BLENDERMCP_OT_InstallDependencies,
     BLENDERMCP_OT_RunMCPServerTerminal,
     BLENDERMCP_OT_CopyMCPClientConfig,
+    BLENDERMCP_OT_CopySystemPrompt,
     BLENDERMCP_OT_HealthCheck,
     BLENDERMCP_OT_OpenLogs,
     BLENDERMCP_OT_ClearCache,

@@ -110,9 +110,61 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps(scene_info).encode("utf-8"))
             except Exception as e:
                 self.send_response(500)
+        elif self.path == "/api/status":
+            try:
+                import sys
+                try:
+                    from addon.core.router import get_registered_commands
+                    cmds = get_registered_commands()
+                except Exception:
+                    cmds = []
+
+                bl_ver = (
+                    ".".join(str(x) for x in getattr(bpy.app, "version", (0, 0, 0)))
+                    if hasattr(bpy, "app")
+                    else "unknown"
+                )
+                is_rend = getattr(bpy.app, "is_rendering", False) if hasattr(bpy, "app") else False
+                if not isinstance(is_rend, bool):
+                    is_rend = False
+
+                scene_name = None
+                obj_count = 0
+                ctx = getattr(bpy, "context", None)
+                if ctx and hasattr(ctx, "scene"):
+                    scene = getattr(ctx, "scene", None)
+                    if scene and hasattr(scene, "name") and isinstance(scene.name, str):
+                        scene_name = scene.name
+                    if scene and hasattr(scene, "objects"):
+                        try:
+                            obj_count = len(scene.objects)
+                        except Exception:
+                            obj_count = 0
+
+                status_data = {
+                    "status": "online",
+                    "blender_version": str(bl_ver),
+                    "python_version": sys.version.split()[0],
+                    "commands_registered": len(cmds),
+                    "active_scene": scene_name,
+                    "objects_count": int(obj_count),
+                    "is_rendering": is_rend,
+                }
+                body = json.dumps(status_data).encode("utf-8")
+                self.send_response(200)
                 self.send_header("Content-type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
-                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode("utf-8"))
+                self.wfile.write(body)
+                self.wfile.flush()
+            except Exception as e:
+                err_body = json.dumps({"status": "error", "message": str(e)}).encode("utf-8")
+                self.send_response(500)
+                self.send_header("Content-type", "application/json")
+                self.send_header("Content-Length", str(len(err_body)))
+                self.end_headers()
+                self.wfile.write(err_body)
+                self.wfile.flush()
         elif self.path == "/api/stream":
             try:
                 self.send_response(200)

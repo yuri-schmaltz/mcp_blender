@@ -2301,6 +2301,204 @@ def analyze_structural_properties(
         return tool_error("Error analyzing structural properties", data={"detail": str(e)})
 
 
+@mcp.tool()
+def snap_to_ground(name: str) -> str:
+    """Adjust an object's Z position so that its lowest point rests precisely on the ground (Z=0.0).
+
+    Args:
+        name: Name of the object to snap to the ground
+    """
+    try:
+        blender = get_blender_connection()
+        result = blender.send_command("snap_to_ground", {"name": name})
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        return tool_error("Error snapping object to ground", data={"detail": str(e)})
+
+
+@mcp.tool()
+def place_object_on_top(child_name: str, parent_name: str, offset_z: float = 0.0, center_xy: bool = True) -> str:
+    """Position an object directly on top of another object without collision or floating.
+
+    Args:
+        child_name: Name of the object to place on top
+        parent_name: Name of the base or supporting object
+        offset_z: Optional vertical gap between objects (default: 0.0)
+        center_xy: Whether to align XY centers of both objects (default: True)
+    """
+    try:
+        blender = get_blender_connection()
+        result = blender.send_command(
+            "place_object_on_top",
+            {
+                "child_name": child_name,
+                "parent_name": parent_name,
+                "offset_z": offset_z,
+                "center_xy": center_xy,
+            },
+        )
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        return tool_error("Error placing object on top", data={"detail": str(e)})
+
+
+@mcp.tool()
+def align_objects(object_names: list[str], axis: str = "X", mode: str = "CENTER") -> str:
+    """Align multiple objects along a specified axis ('X', 'Y', or 'Z').
+
+    Args:
+        object_names: List of object names to align
+        axis: Axis along which to align ('X', 'Y', or 'Z')
+        mode: Alignment mode ('CENTER', 'MIN', or 'MAX')
+    """
+    try:
+        blender = get_blender_connection()
+        result = blender.send_command(
+            "align_objects",
+            {
+                "object_names": object_names,
+                "axis": axis,
+                "mode": mode,
+            },
+        )
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        return tool_error("Error aligning objects", data={"detail": str(e)})
+
+
+@mcp.tool()
+def create_procedural_wire_curve(
+    start_point: list[float] = [0.0, 0.0, 1.0],
+    end_point: list[float] = [2.0, 0.0, 1.0],
+    sag: float = 0.4,
+    bevel_depth: float = 0.015,
+    name: str = "Procedural_Wire",
+) -> str:
+    """Create a procedural hanging wire or cable between two coordinates with natural catenary sag.
+
+    Args:
+        start_point: [x, y, z] start coordinate
+        end_point: [x, y, z] end coordinate
+        sag: Vertical sag depth in meters
+        bevel_depth: Cable radius/thickness in meters
+        name: Name of created wire object
+    """
+    try:
+        blender = get_blender_connection()
+        result = blender.send_command(
+            "create_procedural_wire_curve",
+            {
+                "start_point": start_point,
+                "end_point": end_point,
+                "sag": sag,
+                "bevel_depth": bevel_depth,
+                "name": name,
+            },
+        )
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        return tool_error("Error creating procedural wire curve", data={"detail": str(e)})
+
+
+@mcp.tool()
+def add_geometry_nodes_scatter(
+    target_mesh_name: str,
+    instance_mesh_name: str,
+    density: float = 10.0,
+    seed: int = 0,
+) -> str:
+    """Apply a procedural Geometry Nodes modifier to scatter instances across a target mesh surface.
+
+    Args:
+        target_mesh_name: Name of surface mesh to scatter onto
+        instance_mesh_name: Name of object to instance/scatter
+        density: Scatter density factor
+        seed: Random seed for placement
+    """
+    try:
+        blender = get_blender_connection()
+        result = blender.send_command(
+            "add_geometry_nodes_scatter",
+            {
+                "target_mesh_name": target_mesh_name,
+                "instance_mesh_name": instance_mesh_name,
+                "density": density,
+                "seed": seed,
+            },
+        )
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        return tool_error("Error adding geometry nodes scatter", data={"detail": str(e)})
+
+
+@mcp.tool()
+def import_generated_mesh(
+    filepath: str,
+    name: str | None = None,
+    snap_ground: bool = True,
+    scale: list[float] = [1.0, 1.0, 1.0],
+    location: list[float] = [0.0, 0.0, 0.0],
+) -> str:
+    """Import an AI-generated 3D model (.glb, .gltf, or .obj) from local disk into the scene.
+
+    Args:
+        filepath: Absolute path to the 3D model file on disk
+        name: Optional custom name for the imported object
+        snap_ground: Whether to snap lowest point to ground plane Z=0 (default: True)
+        scale: [x, y, z] scale multiplier
+        location: [x, y, z] target location
+    """
+    try:
+        blender = get_blender_connection()
+        result = blender.send_command(
+            "import_generated_mesh",
+            {
+                "filepath": filepath,
+                "name": name,
+                "snap_ground": snap_ground,
+                "scale": scale,
+                "location": location,
+            },
+        )
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        return tool_error("Error importing generated mesh", data={"detail": str(e)})
+
+
+@mcp.tool()
+def generate_mesh_local_ai(
+    prompt: str | None = None,
+    image_path: str | None = None,
+    api_url: str = "http://127.0.0.1:8000/generate",
+    name: str = "AI_Generated_Model",
+    snap_ground: bool = True,
+) -> str:
+    """Trigger a local native 3D generative model endpoint (TripoSR / Trellis / Hunyuan3D) on GPU.
+
+    Args:
+        prompt: Text description of object to synthesize in 3D
+        image_path: Optional local image path for Image-to-3D generation
+        api_url: URL of local 3D AI generator endpoint
+        name: Name for the imported synthesized model
+        snap_ground: Automatically align base of object to ground Z=0
+    """
+    try:
+        blender = get_blender_connection()
+        result = blender.send_command(
+            "generate_mesh_local_ai",
+            {
+                "prompt": prompt,
+                "image_path": image_path,
+                "api_url": api_url,
+                "name": name,
+                "snap_ground": snap_ground,
+            },
+        )
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        return tool_error("Error executing local 3D AI generation", data={"detail": str(e)})
+
+
 @mcp.prompt()
 def asset_creation_strategy() -> str:
     """Defines the preferred strategy for creating assets in Blender v2.0."""
@@ -2328,6 +2526,76 @@ def asset_creation_strategy() -> str:
        - Configure a câmera focando no produto com setup_camera().
        - Gere renders consistentes com render_catalog_angles().
     """
+
+
+@mcp.prompt()
+def studio_lighting_setup(style: str = "product") -> str:
+    """Prompt template for setting up professional studio lighting in Blender."""
+    return f"""Configuração de Iluminação de Estúdio no Blender (Estilo: {style}):
+
+1. Verifique a cena com get_scene_info() para identificar o objeto principal e o centro da cena.
+2. Limpe luzes residuais ou configure o setup profissional chamando setup_product_studio().
+3. Se for iluminação de 3 pontos:
+   - Key Light: 45 graus na diagonal frontal, intensidade alta, sombra suave.
+   - Fill Light: lado oposto, intensidade de 30-50% da Key Light.
+   - Rim/Back Light: atrás do objeto apontando para as bordas, para destaque e separação do fundo.
+4. Ajuste a câmera com setup_camera(target=objeto_alvo).
+5. Tire um screenshot de validação com get_viewport_screenshot().
+"""
+
+
+@mcp.prompt()
+def procedural_geometry_pipeline(effect: str = "scatter") -> str:
+    """Prompt template for procedural geometry and Geometry Nodes generation."""
+    return f"""Pipeline Procedural com Geometry Nodes no Blender (Efeito: {effect}):
+
+1. Identifique o objeto base na cena com get_scene_info().
+2. Crie ou conecte uma árvore de Geometry Nodes chamando create_geometry_nodes_tree().
+3. Dependendo do efeito ({effect}):
+   - 'scatter': adicione nós 'Distribute Points on Faces' -> 'Instance on Points'.
+   - 'displace': adicione 'Set Position' alimentado por 'Noise Texture' com 'Vector Math (Scale)'.
+   - 'wireframe': utilize 'Mesh to Curve' -> 'Curve to Mesh' com um perfil circular.
+4. Conecte as entradas ao nó 'Group Input' para permitir controle dos parâmetros no painel de modificadores.
+5. Capture get_viewport_screenshot() para validar visualmente o resultado procedural.
+"""
+
+
+@mcp.prompt()
+def print3d_preparation_pipeline() -> str:
+    """Prompt template for 3D printing preparation and mesh repair."""
+    return """Pipeline de Preparação para Impressão 3D:
+
+1. Verificação Dimensional:
+   - Verifique as dimensões do objeto com get_scene_info().
+   - Se necessário, ajuste para as medidas reais em milímetros com set_exact_dimensions().
+2. Auditoria de Malha:
+   - Execute check_mesh_integrity() para inspecionar non-manifold edges, faces invertidas e vértices soltos.
+3. Reparo Automático:
+   - Se houver falhas de manifold, chame auto_repair_mesh() para selar a malha.
+4. Posicionamento na Mesa:
+   - Use snap_to_ground() para assentar a base na mesa (Z=0).
+   - Use auto_layout_for_printing() caso haja múltiplos componentes.
+5. Exportação:
+   - Exporte em STL ou 3MF de alta precisão.
+"""
+
+
+@mcp.prompt()
+def spatial_layout_composition() -> str:
+    """Prompt template for spatial reasoning, ground snapping, and stacking."""
+    return """Pipeline de Composição Espacial e Posicionamento Preciso:
+
+1. Auditoria de Bounding Box:
+   - Analise os limites dos objetos na cena usando get_scene_info().
+2. Assentamento no Solo:
+   - Use snap_to_ground(name=obj_name) para garantir que o objeto não flutua nem penetra o plano Z=0.
+3. Empilhamento e Encaixe:
+   - Use place_object_on_top(child_name=..., parent_name=..., offset_z=0.0) para posicionar objetos sobre superfícies sem colisão.
+4. Enquadramento de Câmera:
+   - Use setup_camera() para enquadrar a composição aplicando a regra dos terços.
+5. Validação Visual:
+   - Capture get_viewport_screenshot() para confirmar o equilíbrio e proporções.
+"""
 
 
 # Main execution

@@ -9,7 +9,57 @@ practical.
 
 Nothing yet.
 
-## [2.14.0] — 2026-09-25
+## [2.18.0] — 2026-09-26
+
+**Comprehensive Modernization: PEP 678 Diagnostic Notes, MCP Prompts, Modern WebUI Dashboard & Telemetry.**
+
+### Added
+- **PEP 678 Diagnostic Notes (`addon/core/router.py`)**: Contexto de execução enriquecido nas exceções (modo atual do Blender, objeto ativo, contagem de seleções, cena ativa) para autorecuperação cirúrgica dos modelos LLM.
+- **Dynamic MCP Prompts (`src/blender_mcp/server.py`)**:
+  - `studio_lighting_setup`: fluxo de iluminação profissional de 3 pontos e produto.
+  - `procedural_geometry_pipeline`: pipeline de Geometry Nodes não destrutivo.
+  - `print3d_preparation_pipeline`: fluxo de validação dimensional, reparo manifold e layout para impressão 3D.
+  - `spatial_layout_composition`: enquadramento e assentamento espacial.
+- **WebUI Modernization & Health Telemetry (`addon/webui_server.py`, `addon/ui/web/index.html`)**:
+  - Novo endpoint `/api/status` fornecendo telemetria em tempo real (versão do Blender, Python, contagem de ferramentas e estado de renderização).
+  - Badges de telemetria ao vivo integradas ao cabeçalho da interface WebUI.
+
+### Changed
+- **Error Handling**: Formato de resposta de erro enriquecido com objeto `diagnostic` estruturado sem quebrar compatibilidade reversa.
+
+**Modern Python Base Upgrade (Python >=3.11, targeting 3.12+).**
+
+### Changed
+- **Python Runtime Baseline**: Elevada a versão mínima do Python de `>=3.10` para `>=3.11` (alinhado com o padrão de extensões do Blender 4.2 LTS / 5.2+).
+- **Linter & Tooling Upgrades**: Ruff, MyPy e Black reconfigurados para `py312`, aproveitando melhorias de performance do compilador CPython adaptativo e tipagem nativa moderna.
+- **AsyncIO & Event Loop**: Benefício direto das otimizações de `asyncio` e parsing de JSON do Python 3.12+ na camada FastMCP.
+
+## [2.16.0] — 2026-09-25
+
+**Native Local AI 3D Mesh Generation & Importer Pipeline (TripoSR, Trellis, Hunyuan3D).**
+
+### Added
+- **Local AI 3D Mesh Handlers (`addon/handlers/ai_3d_generator.py`)**:
+  - `import_generated_mesh`: importa malhas geradas localmente (`.glb`, `.gltf`, `.obj`) com suporte automático a escala, rotação e assentamento no chão (`snap_ground`).
+  - `generate_mesh_local_ai`: dispara a sintetização de malhas 3D em endpoints locais de GPU (TripoSR, Trellis ou Hunyuan3D) e importa diretamente para o Blender sem passos manuais.
+- **FastMCP Integration**: Ferramentas expostas diretamente para clientes LLM em `src/blender_mcp/server.py` e catalogadas em `addon/tool_schemas.py`.
+
+## [2.15.0] — 2026-09-25
+
+**Semantic Spatial Placement, Procedural Geometry Nodes & System Prompt Presets.**
+
+### Added
+- **Spatial Reasoning Tools (`addon/handlers/spatial_tools.py`)**:
+  - `snap_to_ground`: assenta automaticamente o ponto mais baixo do objeto rente ao chão (`Z=0.0`).
+  - `place_object_on_top`: posiciona o objeto filho perfeitamente sobre o topo do objeto pai usando bounding boxes mundiais sem colisões ou flutuação.
+  - `align_objects`: alinha múltiplos objetos por eixos (`X`, `Y`, `Z`) e modos (`CENTER`, `MIN`, `MAX`).
+- **Procedural Geometry Nodes (`addon/handlers/geometry_nodes.py`)**:
+  - `add_geometry_nodes_scatter`: dispersão procedural de instâncias através de nó `GeometryNodeDistributePointsOnFaces` e `GeometryNodeInstanceOnPoints`.
+  - `create_procedural_wire_curve`: criação procedural de curvas de cabos/fios com curvatura física realista entre dois pontos 3D.
+- **System Prompt Generator**:
+  - Novo operador `blendermcp.copy_system_prompt` nas preferências (`Clients & Diagnostics`) para carregar o modelo no LM Studio / Claude com diretrizes exatas de automação do Blender.
+- **FastMCP Server Registration**:
+  - Todas as novas ferramentas espaciais e procedurais expostas na camada FastMCP em `src/blender_mcp/server.py` e catalogadas em `addon/tool_schemas.py`.
 
 **Status bar integration, UI streamlining, built-in chat removal & author consolidation.**
 

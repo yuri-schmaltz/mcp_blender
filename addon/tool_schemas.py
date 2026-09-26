@@ -1337,6 +1337,100 @@ TOOL_SCHEMAS = {
             },
         },
     },
+    # ── Spatial Reasoning & Geometry Nodes ─────────────────────────
+    "snap_to_ground": {
+        "description": "Adjust an object's Z position so that its lowest point rests precisely on the ground plane (Z=0.0).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Name of the object to snap to ground"}
+            },
+            "required": ["name"],
+        },
+    },
+    "place_object_on_top": {
+        "description": "Place child object directly on top of parent object without collision or floating, using world bounding box calculation.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "child_name": {"type": "string", "description": "Name of object to place on top"},
+                "parent_name": {"type": "string", "description": "Name of base/supporting object"},
+                "offset_z": {"type": "number", "description": "Optional additional gap/offset in Z (default: 0.0)", "default": 0.0},
+                "center_xy": {"type": "boolean", "description": "Whether to align XY centers of both objects (default: True)", "default": True},
+            },
+            "required": ["child_name", "parent_name"],
+        },
+    },
+    "align_objects": {
+        "description": "Align multiple objects along a specified axis ('X', 'Y', or 'Z') using CENTER, MIN, or MAX alignment mode.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "object_names": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of object names to align",
+                },
+                "axis": {"type": "string", "enum": ["X", "Y", "Z"], "description": "Axis along which to align (default: 'X')", "default": "X"},
+                "mode": {"type": "string", "enum": ["CENTER", "MIN", "MAX"], "description": "Alignment mode (default: 'CENTER')", "default": "CENTER"},
+            },
+            "required": ["object_names"],
+        },
+    },
+    "create_procedural_wire_curve": {
+        "description": "Create a procedural hanging wire/cable between two 3D coordinates with natural catenary sag.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "start_point": {"type": "array", "items": {"type": "number"}, "description": "[x, y, z] start coordinate"},
+                "end_point": {"type": "array", "items": {"type": "number"}, "description": "[x, y, z] end coordinate"},
+                "sag": {"type": "number", "description": "Vertical sag depth in meters (default: 0.4)", "default": 0.4},
+                "bevel_depth": {"type": "number", "description": "Wire radius/thickness in meters (default: 0.015)", "default": 0.015},
+                "name": {"type": "string", "description": "Name of the created wire object", "default": "Procedural_Wire"},
+            },
+        },
+    },
+    "add_geometry_nodes_scatter": {
+        "description": "Apply a procedural Geometry Nodes modifier to scatter instances across a target mesh surface.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "target_mesh_name": {"type": "string", "description": "Name of surface mesh to scatter onto"},
+                "instance_mesh_name": {"type": "string", "description": "Name of object to instance/scatter"},
+                "density": {"type": "number", "description": "Scatter density (default: 10.0)", "default": 10.0},
+                "seed": {"type": "integer", "description": "Random seed (default: 0)", "default": 0},
+            },
+            "required": ["target_mesh_name", "instance_mesh_name"],
+        },
+    },
+    # ── Local AI 3D Generators (Trellis / TripoSR / Hunyuan3D) ────
+    "import_generated_mesh": {
+        "description": "Import an AI-generated 3D model (.glb, .gltf, or .obj) from local disk into the current Blender scene with automatic ground snapping and transform controls.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "filepath": {"type": "string", "description": "Absolute path to the 3D model file on disk"},
+                "name": {"type": "string", "description": "Optional name for imported object"},
+                "snap_ground": {"type": "boolean", "description": "Whether to snap lowest point to ground plane Z=0 (default: True)", "default": True},
+                "scale": {"type": "array", "items": {"type": "number"}, "description": "[x, y, z] scale multiplier", "default": [1.0, 1.0, 1.0]},
+                "location": {"type": "array", "items": {"type": "number"}, "description": "[x, y, z] target location", "default": [0.0, 0.0, 0.0]},
+            },
+            "required": ["filepath"],
+        },
+    },
+    "generate_mesh_local_ai": {
+        "description": "Trigger a local native 3D generative model endpoint (TripoSR / Trellis / Hunyuan3D) on GPU to synthesize a 3D mesh from prompt/image and import directly into Blender.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "prompt": {"type": "string", "description": "Text description of object to synthesize in 3D"},
+                "image_path": {"type": "string", "description": "Optional local image path for Image-to-3D generation"},
+                "api_url": {"type": "string", "description": "URL of local 3D AI generator endpoint", "default": "http://127.0.0.1:8000/generate"},
+                "name": {"type": "string", "description": "Name for the imported synthesized model", "default": "AI_Generated_Model"},
+                "snap_ground": {"type": "boolean", "description": "Automatically align base of object to ground Z=0", "default": True},
+            },
+        },
+    },
 }
 
 
